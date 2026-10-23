@@ -1,0 +1,25 @@
+{
+  "name": "Chooser – Random Finger Selector",
+  "short_name": "Chooser",
+  "description": "Put your fingers on the screen and let luck decide who plays.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#FF2D55",
+  "theme_color": "#FF2D55",
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ]
+}
