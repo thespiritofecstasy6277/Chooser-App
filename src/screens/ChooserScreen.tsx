@@ -13,11 +13,10 @@ import { cn } from "../utils/cn";
 import { TEAM_COLORS, hexWithAlpha } from "../utils/colors";
 import { canVibrate, feedback } from "../utils/feedback";
 import { shuffle } from "../utils/random";
-import { getPrompts } from "../utils/darePrompts";
 import { requestPrompt } from "../utils/promptFeed";
 
 type ResultMap = Record<number, RingState>;
-type Challenge = { kind: "truth" | "dare"; prompt: string } | null;
+type Challenge = { kind: "truth" | "dare" } | null;
 
 function computeResult(list: Finger[], s: Settings): ResultMap {
   const shuffled = s.cheatMode
@@ -51,19 +50,10 @@ function computeResult(list: Finger[], s: Settings): ResultMap {
 }
 
 function getChallenge(settings: Settings): Challenge {
-  const choose = <T,>(items: T[]) => items[Math.floor(Math.random() * items.length)];
   if (settings.truthOrDare) {
-    const kind = Math.random() < 0.5 ? "truth" : "dare";
-    return {
-      kind,
-      prompt: choose(getPrompts(settings.dareTopic, kind, settings.adultPrompts)),
-    };
+    return { kind: Math.random() < 0.5 ? "truth" : "dare" };
   }
-  if (settings.takeDare)
-    return {
-      kind: "dare" as const,
-      prompt: choose(getPrompts(settings.dareTopic, "dare", settings.adultPrompts)),
-    };
+  if (settings.takeDare) return { kind: "dare" };
   return null;
 }
 
@@ -113,8 +103,6 @@ export function ChooserScreen() {
       setChallengeNotice(null);
       if (selectedChallenge) {
         const label = selectedChallenge.kind === "truth" ? "Truth" : "Dare";
-        const offlineChallenge = `${label}: ${selectedChallenge.prompt}`;
-        setChallenge(offlineChallenge);
         const requestId = ++challengeRequestRef.current;
         setChallenge(`${label}: Loading prompt…`);
         void requestPrompt(
@@ -131,19 +119,19 @@ export function ChooserScreen() {
             }
           })
           .catch((error: unknown) => {
-            console.error("Unable to load a shared prompt; using an offline prompt.", error);
+            console.error("Unable to load a prompt from the shared feed.", error);
             if (challengeRequestRef.current === requestId) {
-              setChallenge(offlineChallenge);
+              setChallenge(`${label}: Prompt unavailable`);
               const status =
                 typeof error === "object" && error !== null && "status" in error
                   ? error.status
                   : undefined;
               setChallengeNotice(
                 status === 404
-                  ? "No saved prompts match this topic, type, and 18+ setting. Check your filters or add matching prompts."
+                  ? "No backend prompts match this topic, type, and 18+ setting. Add matching prompts to the feed."
                   : error instanceof Error
-                    ? `${error.message} — showing a built-in prompt.`
-                    : "Prompt feed unavailable — showing a built-in prompt.",
+                    ? error.message
+                    : "Prompt feed unavailable. Check your connection and try again.",
               );
             }
           });
