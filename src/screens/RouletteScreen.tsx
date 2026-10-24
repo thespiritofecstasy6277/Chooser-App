@@ -195,7 +195,7 @@ export function RouletteScreen() {
                     fontWeight={700}
                     textAnchor="middle"
                     dominantBaseline="middle"
-                    transform={`rotate(${s.mid} ${s.pos.x} ${s.pos.y})`}
+                    transform={`rotate(${s.mid - 90} ${s.pos.x} ${s.pos.y})`}
                   >
                     {s.label.length > 11 ? s.label.slice(0, 10) + "…" : s.label}
                   </text>
