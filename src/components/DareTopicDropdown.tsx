@@ -1,12 +1,11 @@
 import { Check, ChevronDown } from "lucide-react";
 import { useState } from "react";
 import { useSettings } from "../context/SettingsContext";
-import { DARE_TOPICS } from "../utils/darePrompts";
 import { cn } from "../utils/cn";
 import { feedback } from "../utils/feedback";
 
 export function DareTopicDropdown() {
-  const { settings, update } = useSettings();
+  const { settings, topics, topicsError, update } = useSettings();
   const [open, setOpen] = useState(false);
 
   return (
@@ -37,7 +36,12 @@ export function DareTopicDropdown() {
             aria-label="Truth or Dare topics"
             className="anim-pop-in absolute top-full left-1/2 z-50 mt-2 max-h-[55vh] w-[min(86vw,330px)] -translate-x-1/2 overflow-y-auto rounded-3xl bg-[#4a231f]/95 p-2 text-white shadow-2xl backdrop-blur-xl"
           >
-            {DARE_TOPICS.map((topic) => {
+            {topicsError && (
+              <p role="alert" className="px-3 py-2 text-xs text-rose-200">
+                {topicsError}
+              </p>
+            )}
+            {topics.map((topic) => {
               const selected = settings.dareTopic === topic;
               return (
                 <button
