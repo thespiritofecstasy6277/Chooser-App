@@ -1,11 +1,10 @@
-import type { DareTopic } from "./darePrompts";
 import { apiUrl } from "./apiUrl";
 
 export type PromptKind = "truth" | "dare";
 export type PromptSelection = { kind: PromptKind; prompt: string };
 
 export async function requestPrompt(
-  topic: DareTopic,
+  topic: string,
   kind: PromptKind | "all",
   adult: boolean,
 ): Promise<PromptSelection> {
