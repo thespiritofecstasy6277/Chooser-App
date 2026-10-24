@@ -15,20 +15,6 @@ const allowedOrigins = new Set(
     .map((origin) => origin.trim())
     .filter(Boolean),
 );
-const TOPICS = [
-  "Dating and Relationships",
-  "Funny and Silly",
-  "Sports and Fitness",
-  "Education",
-  "Friends",
-  "Movies & Entertainment",
-  "Couples",
-  "Party Night",
-  "Night Out",
-  "Risky Texts",
-  "Football",
-  "All",
-];
 const RATE_LIMIT = 30;
 const RATE_WINDOW_MS = 60_000;
 const MAX_BODY_BYTES = 64 * 1024;
@@ -134,7 +120,7 @@ function validatePrompt(input, partial = false, current = {}) {
   const prompt = { ...current, ...input };
   if (
     (!partial || "topic" in input) &&
-    (typeof prompt.topic !== "string" || !TOPICS.includes(prompt.topic))
+    (typeof prompt.topic !== "string" || prompt.topic.trim().length < 2 || prompt.topic.length > 60)
   ) {
     return "Choose a valid prompt topic.";
   }
@@ -167,6 +153,22 @@ function readId(pathname) {
   return match ? match[1] : null;
 }
 
+function readTopicId(pathname) {
+  const match = pathname.match(/^\/api\/admin\/topics\/([0-9a-f-]{36})$/i);
+  return match ? match[1] : null;
+}
+
+async function isActiveTopic(topic) {
+  if (typeof topic !== "string") return false;
+  const { data, error } = await supabase
+    .from("topics")
+    .select("id")
+    .eq("name", topic)
+    .maybeSingle();
+  if (error) throw error;
+  return Boolean(data);
+}
+
 async function requireAdmin(request) {
   const accessToken =
     request.headers.authorization?.match(/^Bearer (.+)$/)?.[1] ?? "";
@@ -197,7 +199,9 @@ export async function handleRequest(request, response) {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
   const adminRoute =
     url.pathname === "/api/admin/prompts" ||
-    /^\/api\/admin\/prompts\/[0-9a-f-]{36}$/i.test(url.pathname);
+    /^\/api\/admin\/prompts\/[0-9a-f-]{36}$/i.test(url.pathname) ||
+    url.pathname === "/api/admin/topics" ||
+    /^\/api\/admin\/topics\/[0-9a-f-]{36}$/i.test(url.pathname);
 
   if (request.method === "OPTIONS") {
     if (!origin || !isAllowedOrigin(origin, request)) {
@@ -226,12 +230,25 @@ export async function handleRequest(request, response) {
   }
 
   if (url.pathname === "/api/health" && request.method === "GET") {
-    const { error } = await supabase.from("prompts").select("id").limit(1);
+    const { error } = await supabase.from("topics").select("id").limit(1);
     if (error) {
       await respondDbError(response, origin, error, "Unable to connect to Supabase.");
       return;
     }
     sendJson(response, 200, { status: "ok", storage: "supabase" }, origin);
+    return;
+  }
+
+  if (url.pathname === "/api/topics" && request.method === "GET") {
+    const { data, error } = await supabase
+      .from("topics")
+      .select("name")
+      .order("name");
+    if (error) {
+      await respondDbError(response, origin, error, "Unable to load topics.");
+      return;
+    }
+    sendJson(response, 200, { topics: data.map((topic) => topic.name) }, origin);
     return;
   }
 
@@ -251,11 +268,22 @@ export async function handleRequest(request, response) {
     if (
       typeof input !== "object" ||
       input === null ||
-      !TOPICS.includes(input.topic) ||
+      typeof input.topic !== "string" ||
       (input.kind !== "truth" && input.kind !== "dare" && input.kind !== "all") ||
       typeof input.adult !== "boolean"
     ) {
       sendJson(response, 400, { error: "A valid topic, kind, and adult flag are required." }, origin);
+      return;
+    }
+    let topicIsActive;
+    try {
+      topicIsActive = await isActiveTopic(input.topic);
+    } catch (error) {
+      await respondDbError(response, origin, error, "Unable to validate the selected topic.");
+      return;
+    }
+    if (!topicIsActive) {
+      sendJson(response, 400, { error: "Choose an active topic." }, origin);
       return;
     }
     const { data, error } = await fetchAllPages((from, to) => {
@@ -306,15 +334,134 @@ export async function handleRequest(request, response) {
     return;
   }
 
+  if (url.pathname === "/api/admin/topics") {
+    if (request.method === "GET") {
+      const [{ data: topics, error: topicsError }, { data: promptRows, error: promptsError }] =
+        await Promise.all([
+          supabase
+            .from("topics")
+            .select("id, name, truth_target, dare_target")
+            .order("name"),
+          fetchAllPages((from, to) =>
+            supabase.from("prompts").select("topic, kind").order("topic").range(from, to),
+          ),
+        ]);
+      if (topicsError || promptsError) {
+        await respondDbError(
+          response,
+          origin,
+          topicsError ?? promptsError,
+          "Unable to load topics and prompt counts.",
+        );
+        return;
+      }
+      const counts = new Map();
+      for (const prompt of promptRows ?? []) {
+        const count = counts.get(prompt.topic) ?? { truth: 0, dare: 0 };
+        count[prompt.kind] += 1;
+        counts.set(prompt.topic, count);
+      }
+      sendJson(
+        response,
+        200,
+        {
+          topics: topics.map((topic) => ({
+            ...topic,
+            counts: counts.get(topic.name) ?? { truth: 0, dare: 0 },
+          })),
+        },
+        origin,
+      );
+      return;
+    }
+    if (request.method === "POST") {
+      let input;
+      try {
+        input = await readJson(request);
+      } catch (error) {
+        sendJson(response, error.status ?? 400, { error: error.message }, origin);
+        return;
+      }
+      if (
+        typeof input !== "object" ||
+        input === null ||
+        typeof input.name !== "string" ||
+        input.name.trim().length < 2 ||
+        input.name.trim().length > 60
+      ) {
+        sendJson(response, 400, { error: "Topic name must be between 2 and 60 characters." }, origin);
+        return;
+      }
+      const name = input.name.trim().replace(/\s+/g, " ");
+      if (name.toLowerCase() === "all") {
+        sendJson(response, 400, { error: "The All topic is reserved." }, origin);
+        return;
+      }
+      const { data: existing, error: existingError } = await supabase
+        .from("topics")
+        .select("id")
+        .eq("name", name)
+        .maybeSingle();
+      if (existingError) {
+        await respondDbError(response, origin, existingError, "Unable to check the topic name.");
+        return;
+      }
+      if (existing) {
+        sendJson(response, 409, { error: "A topic with this name already exists." }, origin);
+        return;
+      }
+      const { data, error } = await supabase
+        .from("topics")
+        .insert({ name })
+        .select("id, name, truth_target, dare_target")
+        .single();
+      if (error) {
+        if (error.code === "23505") {
+          sendJson(response, 409, { error: "A topic with this name already exists." }, origin);
+          return;
+        }
+        await respondDbError(response, origin, error, "Unable to create the topic.");
+        return;
+      }
+      sendJson(response, 201, { topic: { ...data, counts: { truth: 0, dare: 0 } } }, origin);
+      return;
+    }
+  }
+
+  const topicId = readTopicId(url.pathname);
+  if (topicId && request.method === "DELETE") {
+    const { data, error } = await supabase.rpc("delete_topic_and_prompts", {
+      topic_id: topicId,
+    });
+    if (error) {
+      await respondDbError(response, origin, error, "Unable to delete the topic and its prompts.");
+      return;
+    }
+    if (!data) {
+      sendJson(response, 404, { error: "Topic not found or cannot be deleted." }, origin);
+      return;
+    }
+    sendJson(response, 200, data, origin);
+    return;
+  }
+
   if (url.pathname === "/api/admin/prompts") {
     if (request.method === "GET") {
-      const { data, error } = await fetchAllPages((from, to) =>
-        supabase
+      const kind = url.searchParams.get("kind");
+      const topic = url.searchParams.get("topic");
+      if (kind && kind !== "truth" && kind !== "dare") {
+        sendJson(response, 400, { error: "Kind must be truth or dare." }, origin);
+        return;
+      }
+      const { data, error } = await fetchAllPages((from, to) => {
+        let query = supabase
           .from("prompts")
           .select("id, topic, kind, adult, prompt, enabled, created_at, updated_at")
-          .order("created_at", { ascending: false })
-          .range(from, to),
-      );
+          .order("created_at", { ascending: false });
+        if (kind) query = query.eq("kind", kind);
+        if (topic) query = query.eq("topic", topic);
+        return query.range(from, to);
+      });
       if (error) {
         await respondDbError(response, origin, error);
         return;
@@ -352,6 +499,18 @@ export async function handleRequest(request, response) {
         prompt: item.prompt.trim(),
         enabled: item.enabled ?? true,
       }));
+      const batchTopics = [...new Set(rows.map((row) => row.topic))];
+      let activeTopicResults;
+      try {
+        activeTopicResults = await Promise.all(batchTopics.map((topic) => isActiveTopic(topic)));
+      } catch (error) {
+        await respondDbError(response, origin, error, "Unable to validate prompt topics.");
+        return;
+      }
+      if (activeTopicResults.some((isActive) => !isActive)) {
+        sendJson(response, 400, { error: "Prompts must use an active topic." }, origin);
+        return;
+      }
       const { data, error } = await supabase
         .from("prompts")
         .insert(rows)
@@ -409,6 +568,19 @@ export async function handleRequest(request, response) {
       if (validationError) {
         sendJson(response, 400, { error: validationError }, origin);
         return;
+      }
+      if ("topic" in input) {
+        let topicIsActive;
+        try {
+          topicIsActive = await isActiveTopic(input.topic);
+        } catch (error) {
+          await respondDbError(response, origin, error, "Unable to validate the prompt topic.");
+          return;
+        }
+        if (!topicIsActive) {
+          sendJson(response, 400, { error: "Choose an active prompt topic." }, origin);
+          return;
+        }
       }
       const patch = { ...input };
       if (typeof patch.prompt === "string") patch.prompt = patch.prompt.trim();
