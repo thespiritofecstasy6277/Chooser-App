@@ -6,16 +6,26 @@ import { WHEEL_COLORS } from "../utils/colors";
 import { feedback } from "../utils/feedback";
 
 const SPIN_MS = 4200;
-const DEFAULT_OPTIONS = ["Alex", "Sam", "Jordan", "Taylor", "Casey", "Riley"];
+const DEFAULT_OPTIONS = ["Pramod", "Meeku", "Trishul", "Rithik", "Dharshan", "Gowtham"];
+const LEGACY_DEFAULT_OPTIONS = ["Alex", "Sam", "Jordan", "Taylor", "Casey", "Riley"];
 const STORAGE_KEY = "chooser.roulette.v1";
-const MAX_OPTIONS = 12;
+const MAX_OPTIONS = 40;
 
 function loadOptions(): string[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length >= 2) return parsed.map(String);
+      if (Array.isArray(parsed) && parsed.length >= 2) {
+        const savedOptions = parsed.map(String);
+        if (
+          savedOptions.length === LEGACY_DEFAULT_OPTIONS.length &&
+          savedOptions.every((option, index) => option === LEGACY_DEFAULT_OPTIONS[index])
+        ) {
+          return DEFAULT_OPTIONS;
+        }
+        return savedOptions;
+      }
     }
   } catch {
     /* ignore */
