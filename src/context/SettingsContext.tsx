@@ -15,7 +15,8 @@ import {
   isThemeId,
   RING_COLORS,
 } from "../utils/themes";
-import { DARE_TOPICS, type DareTopic } from "../utils/darePrompts";
+import { DARE_TOPICS } from "../utils/darePrompts";
+import { apiUrl } from "../utils/apiUrl";
 
 export type ChooserMode = "all" | "teams" | "order";
 
@@ -36,7 +37,7 @@ export interface Settings {
   takeDare: boolean;
   truthOrDare: boolean;
   adultPrompts: boolean;
-  dareTopic: DareTopic;
+  dareTopic: string;
   tapMode: boolean;
   cheatMode: boolean;
   notifications: boolean;
@@ -73,8 +74,19 @@ export const DEFAULT_SETTINGS: Settings = {
 
 const STORAGE_KEY = "chooser.settings.v1";
 
+function isTopicList(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (topic: unknown) => typeof topic === "string" && topic.trim().length > 0,
+    )
+  );
+}
+
 interface SettingsContextValue {
   settings: Settings;
+  topics: string[];
+  topicsError: string | null;
   update: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
   reset: () => void;
 }
@@ -115,7 +127,12 @@ function load(): Settings {
         FINGER_EMOJIS.find((emoji) => emoji.value === parsed.fingerEmoji)?.value ??
         DEFAULT_SETTINGS.fingerEmoji,
       adultPrompts: parsed.adultPrompts === true,
-      dareTopic: DARE_TOPICS.find((topic) => topic === parsed.dareTopic) ?? DEFAULT_SETTINGS.dareTopic,
+      dareTopic:
+        typeof parsed.dareTopic === "string" &&
+        parsed.dareTopic.trim().length > 0 &&
+        parsed.dareTopic.length <= 60
+          ? parsed.dareTopic
+          : DEFAULT_SETTINGS.dareTopic,
     };
   } catch {
     return DEFAULT_SETTINGS;
@@ -124,6 +141,58 @@ function load(): Settings {
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<Settings>(load);
+  const [topics, setTopics] = useState<string[]>([...DARE_TOPICS]);
+  const [topicsError, setTopicsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch(apiUrl("/api/topics"))
+      .then(async (response) => {
+        let payload: unknown;
+        try {
+          payload = await response.json();
+        } catch {
+          throw new Error("The topic service returned an invalid response.");
+        }
+        if (!response.ok) {
+          const error =
+            typeof payload === "object" &&
+            payload !== null &&
+            "error" in payload &&
+            typeof payload.error === "string"
+              ? payload.error
+              : "Unable to load the topic list.";
+          throw new Error(error);
+        }
+        if (
+          typeof payload !== "object" ||
+          payload === null ||
+          !("topics" in payload) ||
+          !isTopicList(payload.topics)
+        ) {
+          throw new Error("The topic service returned an invalid topic list.");
+        }
+        if (cancelled) return;
+        const loadedTopics = payload.topics;
+        setTopics(loadedTopics);
+        setTopicsError(null);
+        setSettings((current) =>
+          loadedTopics.includes(current.dareTopic)
+            ? current
+            : { ...current, dareTopic: DEFAULT_SETTINGS.dareTopic },
+        );
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setTopicsError(
+            cause instanceof Error ? cause.message : "Unable to load the topic list.",
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     try {
@@ -145,7 +214,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   );
   const reset = useCallback(() => setSettings(DEFAULT_SETTINGS), []);
 
-  const value = useMemo(() => ({ settings, update, reset }), [settings, update, reset]);
+  const value = useMemo(
+    () => ({ settings, topics, topicsError, update, reset }),
+    [settings, topics, topicsError, update, reset],
+  );
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 }
 
