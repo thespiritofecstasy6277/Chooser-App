@@ -14,9 +14,15 @@ export interface Finger {
 interface Options {
   enabled?: boolean;
   onFingerDown?: (finger: Finger) => void;
+  onLimitReached?: () => void;
   tapMode?: boolean;
   ringColor?: string;
+  maxFingers?: number;
+  accepting?: boolean;
 }
+
+export const MAX_FINGER_COUNT = 50;
+export const MAX_RANKED_FINGER_COUNT = 30;
 
 /**
  * Tracks all fingers currently touching the given element.
@@ -24,19 +30,34 @@ interface Options {
  * - Touch events are used so every simultaneous finger is tracked by id.
  * - Elements marked with `data-ui` (buttons, menus…) are ignored, so UI
  *   controls placed inside the touch area remain clickable.
- * - Desktop fallback: a mouse click adds a "sticky" finger; clicking on
- *   an existing simulated finger removes it again.
+ * - Desktop fallback: mouse clicks add sticky fingers; outside tap mode,
+ *   clicking near an existing simulated finger removes it.
  */
 export function useFingers(
   ref: RefObject<HTMLElement | null>,
-  { enabled = true, onFingerDown, tapMode = false, ringColor }: Options = {},
+  {
+    enabled = true,
+    onFingerDown,
+    onLimitReached,
+    tapMode = false,
+    ringColor,
+    maxFingers = MAX_FINGER_COUNT,
+    accepting = true,
+  }: Options = {},
 ) {
   const [fingers, setFingers] = useState<Finger[]>([]);
   const listRef = useRef<Finger[]>([]);
   const orderRef = useRef(0);
   const simIdRef = useRef(-1);
-  const optionsRef = useRef({ onFingerDown, ringColor, tapMode });
-  optionsRef.current = { onFingerDown, ringColor, tapMode };
+  const optionsRef = useRef({
+    onFingerDown,
+    onLimitReached,
+    ringColor,
+    tapMode,
+    maxFingers,
+    accepting,
+  });
+  optionsRef.current = { onFingerDown, onLimitReached, ringColor, tapMode, maxFingers, accepting };
 
   const publish = useCallback((next: Finger[]) => {
     listRef.current = next;
@@ -64,24 +85,24 @@ export function useFingers(
     };
 
     const addFinger = (list: Finger[], id: number, x: number, y: number) => {
+      if (list.length >= optionsRef.current.maxFingers) {
+        optionsRef.current.onLimitReached?.();
+        return false;
+      }
       const finger: Finger = { id, x, y, color: nextColor(list), order: ++orderRef.current };
       list.push(finger);
       optionsRef.current.onFingerDown?.(finger);
+      return true;
     };
 
     const onTouchStart = (e: TouchEvent) => {
-      if (isUi(e.target)) return;
+      if (isUi(e.target) || !optionsRef.current.accepting) return;
       e.preventDefault();
       const next = [...listRef.current];
       for (const t of Array.from(e.changedTouches)) {
         const { x, y } = local(t.clientX, t.clientY);
         if (optionsRef.current.tapMode) {
-          const hit = next.find((f) => f.id < 0 && Math.hypot(f.x - x, f.y - y) < 60);
-          if (hit) {
-            next.splice(next.indexOf(hit), 1);
-          } else {
-            addFinger(next, simIdRef.current--, x, y);
-          }
+          addFinger(next, simIdRef.current--, x, y);
         } else if (!next.some((f) => f.id === t.identifier)) {
           addFinger(next, t.identifier, x, y);
         }
@@ -115,13 +136,22 @@ export function useFingers(
 
     // Desktop fallback (mouse only – touch pointers are handled above).
     const onPointerDown = (e: PointerEvent) => {
-      if (e.pointerType !== "mouse" || e.button !== 0 || isUi(e.target)) return;
+      if (
+        e.pointerType !== "mouse" ||
+        e.button !== 0 ||
+        isUi(e.target) ||
+        !optionsRef.current.accepting
+      ) {
+        return;
+      }
       const { x, y } = local(e.clientX, e.clientY);
       const current = listRef.current;
-      const hit = current.find((f) => f.id < 0 && Math.hypot(f.x - x, f.y - y) < 60);
-      if (hit) {
-        publish(current.filter((f) => f !== hit));
-        return;
+      if (!optionsRef.current.tapMode) {
+        const hit = current.find((f) => f.id < 0 && Math.hypot(f.x - x, f.y - y) < 60);
+        if (hit) {
+          publish(current.filter((f) => f !== hit));
+          return;
+        }
       }
       const next = [...current];
       addFinger(next, simIdRef.current--, x, y);
@@ -148,5 +178,13 @@ export function useFingers(
     };
   }, [ref, enabled, tapMode, publish]);
 
-  return { fingers, clear };
+  const removeLast = useCallback(() => {
+    const last = listRef.current.reduce<Finger | null>(
+      (latest, finger) => (!latest || finger.order > latest.order ? finger : latest),
+      null,
+    );
+    if (last) publish(listRef.current.filter((finger) => finger !== last));
+  }, [publish]);
+
+  return { fingers, clear, removeLast };
 }
