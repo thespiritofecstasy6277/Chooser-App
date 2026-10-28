@@ -150,7 +150,10 @@ export function ChooserOptions({ showMode = true }: { showMode?: boolean }) {
               />
             </Row>
           )}
-          <Row label="Tap Mode" hint="Tap to add players; best for 5+ players">
+          <Row
+            label="Tap Mode"
+            hint="Tap once per player, then start the draw. Supports up to 50 players, or 30 with ranked, order, or homogeneous-team results."
+          >
             <Toggle
               checked={settings.tapMode}
               onChange={(v) => update("tapMode", v)}
