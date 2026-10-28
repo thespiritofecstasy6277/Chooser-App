@@ -35,6 +35,9 @@ export function FingerRing({
   const isResult = phase === "result";
   const isWinner = isResult && status === "winner";
   const isLoser = isResult && status === "loser";
+  const compact = size < 80;
+  const borderWidth = size < 58 ? 2 : compact ? 3 : 6;
+  const innerInset = size < 58 ? 5 : compact ? 8 : 13;
 
   return (
     <div
@@ -61,8 +64,8 @@ export function FingerRing({
               className="absolute inset-0 rounded-full transition-shadow duration-500"
               style={{
                 boxShadow: isWinner
-                  ? `0 0 70px 14px ${hexWithAlpha(color, 0.65)}`
-                  : `0 0 36px 6px ${hexWithAlpha(color, 0.4)}`,
+                  ? `0 0 ${compact ? 24 : 70}px ${compact ? 5 : 14}px ${hexWithAlpha(color, 0.65)}`
+                  : `0 0 ${compact ? 16 : 36}px ${compact ? 3 : 6}px ${hexWithAlpha(color, 0.4)}`,
               }}
             />
             {/* Ripples for the winner */}
@@ -80,13 +83,14 @@ export function FingerRing({
             )}
             {/* Ring */}
             <div
-              className="absolute inset-0 rounded-full border-[6px] transition-colors duration-500"
-              style={{ borderColor: color }}
+              className="absolute inset-0 rounded-full transition-colors duration-500"
+              style={{ borderColor: color, borderWidth }}
             />
             {/* Inner fill */}
             <div
-              className="absolute inset-[13px] rounded-full transition-all duration-500"
+              className="absolute rounded-full transition-all duration-500"
               style={{
+                inset: innerInset,
                 background: isWinner
                   ? color
                   : isResult && status === "neutral"
@@ -107,7 +111,7 @@ export function FingerRing({
                   r="57"
                   fill="none"
                   stroke="rgba(255,255,255,0.95)"
-                  strokeWidth="6"
+                  strokeWidth={compact ? 3 : 6}
                   strokeLinecap="round"
                   strokeDasharray="358.14"
                   className="anim-arc"
@@ -119,15 +123,21 @@ export function FingerRing({
             {isResult && state?.label && (
               <div className="anim-pop-in absolute inset-0 flex items-center justify-center">
                 <span
-                  className="text-4xl font-extrabold text-white"
-                  style={{ textShadow: "0 2px 10px rgba(0,0,0,0.35)" }}
+                  className="font-extrabold text-white"
+                  style={{
+                    fontSize: Math.max(14, size * 0.3),
+                    textShadow: "0 2px 10px rgba(0,0,0,0.35)",
+                  }}
                 >
                   {state.label}
                 </span>
               </div>
             )}
             {emoji && !(isResult && state?.label) && (
-              <div className="absolute inset-0 flex items-center justify-center text-4xl drop-shadow">
+              <div
+                className="absolute inset-0 flex items-center justify-center drop-shadow"
+                style={{ fontSize: Math.max(14, size * 0.32) }}
+              >
                 {emoji}
               </div>
             )}
