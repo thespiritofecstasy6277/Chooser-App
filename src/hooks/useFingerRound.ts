@@ -6,6 +6,7 @@ export type RoundPhase = "idle" | "counting" | "result";
 interface Options {
   fingers: Finger[];
   countdownMs: number;
+  enabled?: boolean;
   minFingers?: number;
   /** Delay (ms) before returning to idle after all fingers are lifted. */
   resetDelayMs?: number;
@@ -26,6 +27,7 @@ interface Options {
 export function useFingerRound({
   fingers,
   countdownMs,
+  enabled = true,
   minFingers = 2,
   resetDelayMs = 400,
   onCountdownStart,
@@ -53,6 +55,14 @@ export function useFingerRound({
 
   // (Re)start the countdown whenever the set of fingers changes.
   useEffect(() => {
+    if (!enabled) {
+      if (phaseRef.current !== "idle") {
+        setPhase("idle");
+        pendingResetRef.current = false;
+        cbRef.current.onReset?.();
+      }
+      return;
+    }
     if (phaseRef.current === "result") {
       if (count === 0) {
         pendingResetRef.current = true;
@@ -85,7 +95,7 @@ export function useFingerRound({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idsKey, countdownMs, minFingers]);
+  }, [idsKey, countdownMs, enabled, minFingers]);
 
   // After a result, go back to idle once every finger is lifted.
   useEffect(() => {
