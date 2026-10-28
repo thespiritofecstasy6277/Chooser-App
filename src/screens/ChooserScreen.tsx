@@ -7,7 +7,12 @@ import { IconVibrate } from "../components/Icons";
 import { ModeDropdown } from "../components/ModeDropdown";
 import { BottomSheet, Segmented } from "../components/ui";
 import { useSettings, type Settings } from "../context/SettingsContext";
-import { useFingers, type Finger } from "../hooks/useFingers";
+import {
+  MAX_FINGER_COUNT,
+  MAX_RANKED_FINGER_COUNT,
+  useFingers,
+  type Finger,
+} from "../hooks/useFingers";
 import { useFingerRound } from "../hooks/useFingerRound";
 import { cn } from "../utils/cn";
 import { TEAM_COLORS, hexWithAlpha } from "../utils/colors";
@@ -70,25 +75,48 @@ export function ChooserScreen() {
   const [challengeNotice, setChallengeNotice] = useState<string | null>(null);
   const [holdSeconds, setHoldSeconds] = useState(15);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [tapRoundStarted, setTapRoundStarted] = useState(false);
+  const [fingerLimitReached, setFingerLimitReached] = useState(false);
   const resultOrderRef = useRef(0);
   const challengeRequestRef = useRef(0);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const shouldHoldResults =
     settings.mode === "teams" || settings.mode === "order" || settings.homogeneousTeams;
+  const maxPlayers =
+    settings.rankWinners || settings.mode === "order" || settings.homogeneousTeams
+      ? MAX_RANKED_FINGER_COUNT
+      : MAX_FINGER_COUNT;
 
   const onFingerDown = useCallback(() => feedback.tap(), []);
-  const { fingers, clear } = useFingers(areaRef, {
+  const {
+    fingers,
+    clear: clearFingers,
+    removeLast: removeLastFinger,
+  } = useFingers(areaRef, {
     onFingerDown,
+    onLimitReached: () => setFingerLimitReached(true),
     tapMode: settings.tapMode,
     ringColor: settings.ringColor,
+    maxFingers: maxPlayers,
+    accepting: result === null,
   });
+  const clear = useCallback(() => {
+    clearFingers();
+    setFingerLimitReached(false);
+    setTapRoundStarted(false);
+  }, [clearFingers]);
+  const removeLast = useCallback(() => {
+    removeLastFinger();
+    setFingerLimitReached(false);
+  }, [removeLastFinger]);
 
   const countdownMs = settings.countdown * 1000;
 
   const { phase, roundId, reset: resetRound } = useFingerRound({
     fingers,
     countdownMs,
+    enabled: !settings.tapMode || tapRoundStarted,
     resetDelayMs: shouldHoldResults ? 15_000 : 400,
     onCountdownStart: () => feedback.countdown(countdownMs),
     onCountdownCancel: () => feedback.cancel(),
@@ -149,6 +177,8 @@ export function ChooserScreen() {
     },
     onReset: () => {
       challengeRequestRef.current += 1;
+      setTapRoundStarted(false);
+      setFingerLimitReached(false);
       setResult(null);
       setResultFingers(null);
       setChallenge(null);
@@ -185,10 +215,17 @@ export function ChooserScreen() {
   );
   const hasSimulated = fingers.some((f) => f.id < 0);
   const showTitle = fingers.length === 0 && phase === "idle";
+  const compactRings = visibleFingers.length > 10;
+  const ringSize = compactRings
+    ? Math.max(44, 124 - (visibleFingers.length - 10) * 1.8)
+    : 124;
 
   let hint: string | null = null;
-  if (phase === "idle" && settings.tapMode && fingers.length === 0) hint = "Tap to add players";
-  else if (phase === "idle" && fingers.length === 1) hint = "Add more fingers";
+  if (phase === "idle" && settings.tapMode && fingers.length === 0) {
+    hint = `Tap to add up to ${maxPlayers} players`;
+  } else if (phase === "idle" && settings.tapMode && fingers.length === 1) {
+    hint = `1/${maxPlayers} players — tap to add more`;
+  } else if (phase === "idle" && fingers.length === 1) hint = "Add more fingers";
   else if (phase === "counting") hint = "Hold still…";
   else if (isResult) {
     const label =
@@ -307,6 +344,7 @@ export function ChooserScreen() {
           countdownMs={countdownMs}
           state={isResult ? result[f.id] : undefined}
           emoji={settings.fingerEmoji}
+          size={ringSize}
         />
       ))}
 
@@ -348,6 +386,33 @@ export function ChooserScreen() {
             >
               <RefreshCw size={20} />
             </button>
+          </div>
+        ) : settings.tapMode && phase === "idle" && fingers.length > 0 ? (
+          <div className="pointer-events-auto flex max-w-full items-center gap-2 rounded-full bg-black/25 px-3 py-2 text-sm font-semibold text-white backdrop-blur-sm">
+            <button
+              type="button"
+              data-ui
+              onClick={removeLast}
+              className="rounded-full px-3 py-2 transition hover:bg-white/15 active:scale-95"
+              aria-label="Remove the last player"
+            >
+              Undo
+            </button>
+            <span className="whitespace-nowrap">
+              {fingerLimitReached
+                ? `Maximum ${maxPlayers} players`
+                : `${fingers.length}/${maxPlayers} players`}
+            </span>
+            {fingers.length >= 2 && (
+              <button
+                type="button"
+                data-ui
+                onClick={() => setTapRoundStarted(true)}
+                className="rounded-full bg-white px-4 py-2 text-[#7d2947] transition active:scale-95"
+              >
+                Choose
+              </button>
+            )}
           </div>
         ) : isResult && settings.tapMode ? (
           <button
